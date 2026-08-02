@@ -18,6 +18,7 @@ const defaultTasks = [
 ]
 
 const defaultTarget = 120
+const STORAGE_KEY = 'lifepoints-v2'
 
 const categoryTints = {
   Ernährung: 'from-emerald-400/12 to-teal-300/6',
@@ -26,25 +27,16 @@ const categoryTints = {
   Produktivität: 'from-rose-400/12 to-rose-700/10',
 }
 
-function getTodayKey() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function getWeekKey() {
-  const d = new Date()
-  const year = d.getFullYear()
-  const start = new Date(year, 0, 1)
-  const days = Math.floor((d - start) / 86400000)
-  const week = Math.ceil((days + start.getDay() + 1) / 7)
-  return `${year}-W${week}`
+function formatLocalDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA').format(date)
 }
 
 function startOfWeek(date = new Date()) {
   const d = new Date(date)
-  const day = d.getDay()
-  const diff = (day === 0 ? -6 : 1) - day
-  d.setDate(d.getDate() + diff)
   d.setHours(0, 0, 0, 0)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
   return d
 }
 
@@ -55,14 +47,63 @@ function endOfWeek(date = new Date()) {
   return d
 }
 
+function getTodayKey(date = new Date()) {
+  return formatLocalDateKey(date)
+}
+
+function getWeekKey(date = new Date()) {
+  return formatLocalDateKey(startOfWeek(date))
+}
+
 function formatShort(date) {
   return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
 }
 
-const STORAGE_KEY = 'lifepoints'
+function formatWeekRangeFromKey(weekKey) {
+  const start = new Date(`${weekKey}T00:00:00`)
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+  return {
+    from: formatShort(start),
+    to: formatShort(end),
+  }
+}
 
 function createEmptyCounts() {
   return {}
+}
+
+function getTaskPointsFromCounts(counts) {
+  return defaultTasks.reduce((sum, task) => sum + (counts[task.id] || 0) * task.points, 0)
+}
+
+function normalizeArchiveItem(item) {
+  return {
+    id: item?.id || '',
+    from: item?.from || '',
+    to: item?.to || '',
+    points: typeof item?.points === 'number' ? item.points : 0,
+    goalReached: Boolean(item?.goalReached),
+  }
+}
+
+function finalizePreviousWeek({ oldWeekKey, oldCountsWeek, weeklyGoal, oldArchive }) {
+  const alreadyArchived = oldArchive.some((item) => item.id === oldWeekKey)
+  if (alreadyArchived) return oldArchive
+
+  const previousWeekPoints = getTaskPointsFromCounts(oldCountsWeek)
+  const range = formatWeekRangeFromKey(oldWeekKey)
+
+  return [
+    {
+      id: oldWeekKey,
+      from: range.from,
+      to: range.to,
+      points: previousWeekPoints,
+      goalReached: previousWeekPoints >= weeklyGoal,
+    },
+    ...oldArchive,
+  ]
 }
 
 export default function App() {
@@ -75,6 +116,7 @@ export default function App() {
   const [weekKey, setWeekKey] = useState(getWeekKey())
   const [showCongrats, setShowCongrats] = useState(false)
   const [hydrated, setHydrated] = useState(false)
+  const [weekResultNotice, setWeekResultNotice] = useState(null)
 
   useEffect(() => {
     const currentTodayKey = getTodayKey()
@@ -87,24 +129,56 @@ export default function App() {
       saved = null
     }
 
+    let nextCountsToday = {}
+    let nextCountsWeek = {}
+    let nextCountsTotal = {}
+    let nextArchive = []
+    let nextWeekNotice = null
+
     if (saved) {
-      if (saved.weekKey === currentWeekKey) {
-        setCountsWeek(saved.countsWeek || {})
-      }
+      nextCountsTotal = saved.countsTotal || {}
+      nextArchive = Array.isArray(saved.weekArchive) ? saved.weekArchive.map(normalizeArchiveItem) : []
+
       if (saved.todayKey === currentTodayKey) {
-        setCountsToday(saved.countsToday || {})
+        nextCountsToday = saved.countsToday || {}
       }
-      setCountsTotal(saved.countsTotal || {})
-      setWeekArchive(saved.weekArchive || [])
+
+      if (saved.weekKey === currentWeekKey) {
+        nextCountsWeek = saved.countsWeek || {}
+      } else if (saved.weekKey && saved.countsWeek) {
+        nextArchive = finalizePreviousWeek({
+          oldWeekKey: saved.weekKey,
+          oldCountsWeek: saved.countsWeek || {},
+          weeklyGoal,
+          oldArchive: nextArchive,
+        })
+
+        const previousWeekPoints = getTaskPointsFromCounts(saved.countsWeek || {})
+        nextWeekNotice = {
+          weekKey: saved.weekKey,
+          points: previousWeekPoints,
+          goalReached: previousWeekPoints >= weeklyGoal,
+        }
+      }
+
+      if (saved.lastWeekResultShownFor === currentWeekKey) {
+        nextWeekNotice = null
+      }
     }
 
+    setCountsToday(nextCountsToday)
+    setCountsWeek(nextCountsWeek)
+    setCountsTotal(nextCountsTotal)
+    setWeekArchive(nextArchive)
     setTodayKey(currentTodayKey)
     setWeekKey(currentWeekKey)
+    setWeekResultNotice(nextWeekNotice)
     setHydrated(true)
-  }, [])
+  }, [weeklyGoal])
 
   useEffect(() => {
     if (!hydrated) return
+
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
@@ -114,14 +188,18 @@ export default function App() {
         countsWeek,
         countsTotal,
         weekArchive,
+        lastWeekResultShownFor: weekResultNotice ? null : weekKey,
       })
     )
-  }, [hydrated, todayKey, weekKey, countsToday, countsWeek, countsTotal, weekArchive])
+  }, [hydrated, todayKey, weekKey, countsToday, countsWeek, countsTotal, weekArchive, weekResultNotice])
 
   useEffect(() => {
+    if (!hydrated) return
+
     const timer = setInterval(() => {
-      const newTodayKey = getTodayKey()
-      const newWeekKey = getWeekKey()
+      const now = new Date()
+      const newTodayKey = getTodayKey(now)
+      const newWeekKey = getWeekKey(now)
 
       if (newTodayKey !== todayKey) {
         setTodayKey(newTodayKey)
@@ -129,28 +207,27 @@ export default function App() {
       }
 
       if (newWeekKey !== weekKey) {
-        const previousWeekPoints = defaultTasks.reduce(
-          (sum, task) => sum + (countsWeek[task.id] || 0) * task.points,
-          0
-        )
-        const now = new Date()
-        setWeekArchive((prev) => [
-          {
-            id: weekKey,
-            from: formatShort(startOfWeek(now)),
-            to: formatShort(endOfWeek(now)),
-            points: previousWeekPoints,
-            goalReached: previousWeekPoints >= weeklyGoal,
-          },
-          ...prev,
-        ])
+        const previousWeekPoints = getTaskPointsFromCounts(countsWeek)
+        const nextArchive = finalizePreviousWeek({
+          oldWeekKey: weekKey,
+          oldCountsWeek: countsWeek,
+          weeklyGoal,
+          oldArchive: weekArchive,
+        })
+
+        setWeekArchive(nextArchive)
         setWeekKey(newWeekKey)
         setCountsWeek({})
+        setWeekResultNotice({
+          weekKey,
+          points: previousWeekPoints,
+          goalReached: previousWeekPoints >= weeklyGoal,
+        })
       }
     }, 60000)
 
     return () => clearInterval(timer)
-  }, [todayKey, weekKey, countsWeek, weeklyGoal])
+  }, [hydrated, todayKey, weekKey, countsWeek, weekArchive, weeklyGoal])
 
   const todayDate = new Date()
   const currentEnd = endOfWeek(todayDate)
@@ -231,6 +308,24 @@ export default function App() {
     })
   }
 
+  const dismissWeekNotice = () => {
+    const currentWeekForStorage = weekKey
+    setWeekResultNotice(null)
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || {}
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...saved,
+          lastWeekResultShownFor: currentWeekForStorage,
+        })
+      )
+    } catch {
+      // nothing
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0b1220] text-white px-4 py-5">
       <div className="mx-auto max-w-md space-y-4">
@@ -282,6 +377,34 @@ export default function App() {
             {showCongrats && <div className="mt-3 text-sm text-emerald-300 animate-pulse">🎊 Ziel erreicht!</div>}
           </div>
         </header>
+
+        {weekResultNotice && (
+          <section
+            className={`rounded-3xl border p-4 backdrop-blur-2xl shadow-[0_18px_50px_rgba(0,0,0,0.28)] ${
+              weekResultNotice.goalReached
+                ? 'border-emerald-400/30 bg-emerald-400/10'
+                : 'border-rose-400/30 bg-rose-400/10'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-semibold mb-1">Wochenabschluss</h2>
+                <p className="text-sm text-white/80 leading-6">
+                  {weekResultNotice.goalReached
+                    ? `Hurra, du hast die Punktzahl diese Woche erreicht. Du hast ${weekResultNotice.points} Punkte gesammelt.`
+                    : `Diese Woche wurde das Ziel leider nicht erreicht. Du hast ${weekResultNotice.points} von ${weeklyGoal} Punkten gesammelt.`}
+                </p>
+              </div>
+
+              <button
+                onClick={dismissWeekNotice}
+                className="shrink-0 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs text-white/80"
+              >
+                OK
+              </button>
+            </div>
+          </section>
+        )}
 
         {Object.entries(groupedTasks).map(([category, tasks]) => (
           <section
@@ -370,6 +493,42 @@ export default function App() {
               <p className="text-sm text-white/40">Noch keine Einträge.</p>
             )}
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-2xl shadow-[0_18px_50px_rgba(0,0,0,0.28)] p-5">
+          <h2 className="text-lg font-semibold mb-3">🗓 Vergangene Wochen</h2>
+
+          {weekArchive.length > 0 ? (
+            <div className="space-y-2">
+              {weekArchive.map((week) => (
+                <div
+                  key={week.id}
+                  className="flex items-center justify-between rounded-2xl bg-white/5 border border-white/10 px-4 py-3 gap-3"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-white/85">
+                      {week.from} – {week.to}
+                    </p>
+                    <p className="text-xs text-white/45">
+                      {week.points} / {weeklyGoal} Punkte
+                    </p>
+                  </div>
+
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${
+                      week.goalReached
+                        ? 'bg-emerald-400/15 text-emerald-300'
+                        : 'bg-rose-400/15 text-rose-300'
+                    }`}
+                  >
+                    {week.goalReached ? 'Ziel erreicht' : 'Nicht erreicht'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-white/40">Noch keine abgeschlossenen Wochen.</p>
+          )}
         </section>
       </div>
     </div>
