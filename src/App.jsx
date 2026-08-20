@@ -181,6 +181,7 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false)
   const [weekResultNotice, setWeekResultNotice] = useState(null)
   const [confettiBursts, setConfettiBursts] = useState({})
+  const [statsTask, setStatsTask] = useState(null)
 
   useEffect(() => {
     const currentTodayKey = getTodayKey()
@@ -426,7 +427,7 @@ export default function App() {
         .confetti-piece {
           position: absolute;
           top: 50%;
-          left: 44px;
+          left: 48px;
           animation: confetti-pop 650ms cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
           pointer-events: none;
         }
@@ -546,7 +547,7 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 {tasks.map((task) => {
                   const todayCount = countsToday[task.id] || 0
                   const weekCount = countsWeek[task.id] || 0
@@ -557,7 +558,7 @@ export default function App() {
                     <button
                       key={task.id}
                       onClick={() => addPoints(task.id)}
-                      className="relative flex w-full items-center gap-3 rounded-3xl bg-white/[0.08] p-3 text-left
+                      className="relative flex w-full items-center gap-4 rounded-3xl bg-white/[0.08] p-4 text-left
                         transition-all duration-150 ease-out
                         hover:-translate-y-0.5 hover:bg-white/[0.12]
                         active:translate-y-0 active:scale-[0.98]"
@@ -567,38 +568,48 @@ export default function App() {
                       )}
 
                       <span
-                        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full"
+                        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full"
                         style={{ background: theme.card }}
                       >
-                        <i className={`ti ${taskIcons[task.id] || theme.icon}`} style={{ fontSize: 22, color: '#F2F7F4' }} aria-hidden="true"></i>
+                        <i className={`ti ${taskIcons[task.id] || theme.icon}`} style={{ fontSize: 26, color: '#F2F7F4' }} aria-hidden="true"></i>
                       </span>
 
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-[14px] font-semibold leading-tight truncate">{task.label}</h3>
-                        <p className="text-[10px] mt-0.5" style={{ color: '#C4D6CB' }}>
-                          Heute {todayCount} · Woche {weekCount} · Gesamt {totalCount}
-                        </p>
+                        <h3 className="text-[15px] font-semibold leading-tight">{task.label}</h3>
                       </div>
 
-                      <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      <div className="flex shrink-0 items-center gap-2.5">
                         <span
-                          className="rounded-full bg-white text-xs font-bold px-2.5 py-1"
+                          className="rounded-full bg-white text-sm font-bold px-3 py-1.5"
                           style={{ color: theme.card }}
                         >
                           +{task.points}
                         </span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            undoPoints(task.id)
-                          }}
-                          disabled={!hasAny}
-                          className="flex h-6 w-6 items-center justify-center rounded-full bg-white/10 border border-white/15
-                            transition-all duration-150 ease-out hover:bg-white/20 active:scale-90
-                            disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100"
-                        >
-                          <i className="ti ti-arrow-back-up" style={{ fontSize: 12, color: '#F2F7F4' }} aria-hidden="true"></i>
-                        </button>
+
+                        <div className="flex flex-col gap-1.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setStatsTask(task)
+                            }}
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 border border-white/15
+                              transition-all duration-150 ease-out hover:bg-white/20 active:scale-90"
+                          >
+                            <i className="ti ti-chart-bar" style={{ fontSize: 14, color: '#F2F7F4' }} aria-hidden="true"></i>
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              undoPoints(task.id)
+                            }}
+                            disabled={!hasAny}
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 border border-white/15
+                              transition-all duration-150 ease-out hover:bg-white/20 active:scale-90
+                              disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100"
+                          >
+                            <i className="ti ti-arrow-back-up" style={{ fontSize: 14, color: '#F2F7F4' }} aria-hidden="true"></i>
+                          </button>
+                        </div>
                       </div>
                     </button>
                   )
@@ -684,6 +695,44 @@ export default function App() {
           )}
         </section>
       </div>
+
+      {statsTask && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
+          onClick={() => setStatsTask(null)}
+        >
+          <div
+            className="relative w-full max-w-xs rounded-3xl bg-white p-5 shadow-[0_20px_50px_rgba(0,0,0,0.3)]"
+            style={{ color: '#151A17' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setStatsTask(null)}
+              className="absolute top-3 right-3 flex h-8 w-8 items-center justify-center rounded-full bg-[#F1F5F2] border border-black/5
+                transition-all duration-150 ease-out hover:bg-[#E4EBE5] active:scale-90"
+            >
+              <i className="ti ti-x" style={{ fontSize: 15 }} aria-hidden="true"></i>
+            </button>
+
+            <h3 className="text-[15px] font-bold pr-8 mb-4">{statsTask.label}</h3>
+
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between rounded-2xl bg-[#F1F5F2] px-4 py-2.5">
+                <span className="text-sm text-[#5A6A5F]">Heute</span>
+                <span className="font-display text-lg font-bold">{countsToday[statsTask.id] || 0}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-2xl bg-[#F1F5F2] px-4 py-2.5">
+                <span className="text-sm text-[#5A6A5F]">Woche</span>
+                <span className="font-display text-lg font-bold">{countsWeek[statsTask.id] || 0}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-2xl bg-[#F1F5F2] px-4 py-2.5">
+                <span className="text-sm text-[#5A6A5F]">Gesamt</span>
+                <span className="font-display text-lg font-bold">{countsTotal[statsTask.id] || 0}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
